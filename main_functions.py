@@ -1,6 +1,7 @@
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
+import whisper
 
 class sound:
     frames = []
@@ -22,19 +23,48 @@ class sound:
     def stop(filename):
         stream.stop()
         stream.close()
-        sf.write(f"{filename}.wav", np.concatenate(frames), 44100)
+        sf.write(filename, np.concatenate(frames), 44100)
+
+    playback_stream = None
 
     def play(file):
+        global playback_stream
         audio_data, samplerate = sf.read(file)
-        sd.play(audio_data, samplerate)
-        sd.wait()
+        playback_stream = sd.play(audio_data, samplerate)
+
+    def stop_play():
+        global playback_stream
+        sd.stop()
+
+# stt = speech to text
+# using openais whisper model
+def stt(file):
+    model = whisper.load_model("turbo")
+    model = whisper.load_model("turbo")
+    result = model.transcribe(file)
+    #testing purposes
+    #print(result["text"])
+    return result["text"]
+
+file = "output.wav"
 
 """
 #this is for testing purposes
+
 input("press enter to start")
 sound.record()
+
 input ("press enter to end")
-sound.stop('output')
+sound.stop(file)
+
 input("press enter to play")
-sound.play('output.wav')
+sound.play(file)
+
+input("press enter to stop playing")
+sound.stop_play()
+
+#before testing this, you need to uncomment the print(result[text]) line in the stt function
+input("press enter to transcribe")
+stt(file)
+
 """
