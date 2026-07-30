@@ -1,8 +1,14 @@
+#sound
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
+#stt
 import whisper
-
+#ollama
+from ollama import chat
+import json
+import uuid
+import os
 class sound:
     frames = []
     stream = None
@@ -46,20 +52,57 @@ def stt(file):
     #print(result["text"])
     return result["text"]
 
-file = "output.wav"
+class ollama:
+    #because you have self, you need to call this function using ollama().ai(...)) instead of ollama.ai(...)
+    def ai(self, chatid, message):
+        msgs = self.handleInput(chatid, message)
 
-"""
+        stream = chat(
+            model='mistral',
+            messages=msgs,
+            stream=True,
+        )
+
+        for chunk in stream:
+            yield chunk['message']['content']
+            """
+            #in the other file, you can do this:
+            import main_functions as mf
+            for text in mf.ollama().ai(False, "why is the sky blue?"):
+                print(text, end='', flush=True)
+            #this will take the stream and print it (but you should use text to speech)
+            """
+
+    def handleInput(self, chatid, message):
+        if not os.path.isfile(f"./chats/{chatid}.json"):
+            msgs = [{'role': 'user', 'content': message}]
+            with open(f"./chats/{chatid}.json", "x") as file:
+                json.dump(msgs, file, indent=4)
+            return msgs
+        else:
+            with open(f"./chats/{chatid}.json", "r") as file:
+                msgs = json.load(file)
+            new_msg = {'role': 'user', 'content': message}
+            msgs.append(new_msg)
+            with open(f"./chats/{chatid}.json", "w"):
+                json.dump(msgs, file, intent=4)
+            return msgs
+
+    #and this one, you need to call with ollama.delChat()
+    def delChat(chatid):
+        os.remove(f"./chats/{chatid}.json")
+
+    def newId():
+        return uuid.uuid4()
 #this is for testing purposes
-
+"""
+file = "output.wav"
 input("press enter to start")
 sound.record()
-
 input ("press enter to end")
 sound.stop(file)
-
 input("press enter to play")
 sound.play(file)
-
 input("press enter to stop playing")
 sound.stop_play()
 
@@ -67,4 +110,7 @@ sound.stop_play()
 input("press enter to transcribe")
 stt(file)
 
+ollama().ai(ollama.newId(), "hello")
+ollama.delChat("a046ec2a-f52c-43ef-903a-7b7ce8849ad7")
+print(ollama.newId())
 """

@@ -2,3 +2,5 @@ venv/
 .env
 output.wav
 index.py
+chats/*
+__pycache__/
