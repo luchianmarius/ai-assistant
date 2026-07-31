@@ -4,11 +4,12 @@ import soundfile as sf
 import numpy as np
 #stt
 import whisper
-#ollama
+#ai
 from ollama import chat
-import json
-import uuid
-import os
+import json, uuid, os
+#tts
+import pyttsx3
+
 class sound:
     frames = []
     stream = None
@@ -52,41 +53,54 @@ def stt(file):
     #print(result["text"])
     return result["text"]
 
-class ollama:
+class ai:
     #because you have self, you need to call this function using ollama().ai(...)) instead of ollama.ai(...)
-    def ai(self, chatid, message):
-        msgs = self.handleInput(chatid, message)
+    def ollama(self, chatid, message):
+        msgs = self.jsonAppend(chatid, 'user', message)
 
         stream = chat(
             model='mistral',
             messages=msgs,
             stream=True,
         )
+        
+        answer = ""
 
         for chunk in stream:
-            yield chunk['message']['content']
+            text = chunk['message']['content']
+            answer += text
+            yield text
             """
-            #in the other file, you can do this:
-            import main_functions as mf
-            for text in mf.ollama().ai(False, "why is the sky blue?"):
-                print(text, end='', flush=True)
-            #this will take the stream and print it (but you should use text to speech)
+                #in the other file, you can do this:
+                import main_functions as mf
+                for text in mf.ai().ollama(mf.ai.newId(), "why is the sky blue?"):
+                    print(text, end='', flush=True)
+                #this will take the stream and print it (but you should use text to speech)
             """
 
-    def handleInput(self, chatid, message):
-        if not os.path.isfile(f"./chats/{chatid}.json"):
-            msgs = [{'role': 'user', 'content': message}]
-            with open(f"./chats/{chatid}.json", "x") as file:
-                json.dump(msgs, file, indent=4)
-            return msgs
+        self.jsonAppend(chatid, 'assistant', answer)
+
+    def jsonAppend(self, id, usr, msg):
+        if usr not in ("user", "assistant"):
+            print("!!! The user must be either 'user' or 'assistant'")
+            return 
+    
+        path = f"./chats/{id}.json"
+        newmsg = {'role': usr, 'content': msg}
+        content = []
+
+        if not os.path.isfile(path):    
+            with open(path, "x") as file:
+                content = [newmsg]
+                json.dump(content, file, indent=4)
         else:
-            with open(f"./chats/{chatid}.json", "r") as file:
-                msgs = json.load(file)
-            new_msg = {'role': 'user', 'content': message}
-            msgs.append(new_msg)
-            with open(f"./chats/{chatid}.json", "w"):
-                json.dump(msgs, file, intent=4)
-            return msgs
+            with open(path, "r") as file:
+                content = json.load(file)
+            content.append(newmsg)
+
+            with open(path, "w") as file:
+                json.dump(content, file, indent=4)
+        return content
 
     #and this one, you need to call with ollama.delChat()
     def delChat(chatid):
@@ -94,6 +108,13 @@ class ollama:
 
     def newId():
         return uuid.uuid4()
+
+ttsEngine = pyttsx3.init()
+ttsEngine.setProperty('rate', 140)
+
+def tts(text):
+    ttsEngine.say(text)
+    ttsEngine.runAndWait()
 #this is for testing purposes
 """
 file = "output.wav"
@@ -110,7 +131,16 @@ sound.stop_play()
 input("press enter to transcribe")
 stt(file)
 
-ollama().ai(ollama.newId(), "hello")
-ollama.delChat("a046ec2a-f52c-43ef-903a-7b7ce8849ad7")
-print(ollama.newId())
+ai().ollama(ai.newId(), "hello")
+ai.delChat("a046ec2a-f52c-43ef-903a-7b7ce8849ad7")
+print(ai.newId())
+
+testid = ai.newId()
+answer = ''
+for t in ai().ollama(testid, "hello"):
+    answer += t
+tts(answer)
+print()
+for t in ai().ollama(testid, "why is the sky blue?"):
+    print(t, end='', flush=True)
 """
