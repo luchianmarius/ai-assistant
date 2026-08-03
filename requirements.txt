@@ -1,6 +1,7 @@
 ollama
 openai-whisper
-pyttsx3
+piper-tts
+langdetect
 sounddevice
 soundfile
 numpy

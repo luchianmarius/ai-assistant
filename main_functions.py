@@ -1,3 +1,5 @@
+#general purpose
+import json, uuid, os
 #sound
 import sounddevice as sd
 import soundfile as sf
@@ -6,9 +8,10 @@ import numpy as np
 import whisper
 #ai
 from ollama import chat
-import json, uuid, os
 #tts
-import pyttsx3
+from piper import PiperVoice
+from langdetect import detect as ld
+import wave
 
 class sound:
     frames = []
@@ -27,10 +30,12 @@ class sound:
         )
         stream.start()
 
-    def stop(filename):
+    def stop():
         stream.stop()
         stream.close()
-        sf.write(filename, np.concatenate(frames), 44100)
+        fileId = newId()
+        sf.write(f"audio/stt/{fileId}.wav", np.concatenate(frames), 44100)
+        return fileId
 
     playback_stream = None
 
@@ -73,7 +78,7 @@ class ai:
             """
                 #in the other file, you can do this:
                 import main_functions as mf
-                for text in mf.ai().ollama(mf.ai.newId(), "why is the sky blue?"):
+                for text in mf.ai().ollama(mf.newId(), "why is the sky blue?"):
                     print(text, end='', flush=True)
                 #this will take the stream and print it (but you should use text to speech)
             """
@@ -106,41 +111,56 @@ class ai:
     def delChat(chatid):
         os.remove(f"./chats/{chatid}.json")
 
-    def newId():
-        return uuid.uuid4()
+def newId():
+    return uuid.uuid4()
 
+def tts(text):
+    # Load a voice model
+    language = ld(text)
+
+    with open("audio/tts/voices/tts_models.json", "r") as file:
+        langlist = json.load(file)
+        lang_model = None
+        for i in langlist:
+            if i["language"] == language:
+                lang_model = i["model_dir"]
+                break
+    
+    if not lang_model:
+        raise ValueError(f"Keine Voice für language='{language}' gefunden")
+
+    if not os.path.isfile(lang_model):
+        raise FileNotFoundError(f"Modell-ONNX existiert nicht: {lang_model}")
+
+    print("Using language:", language)
+    print("Using model:", lang_model)
+
+    voice = PiperVoice.load(
+        model_path=lang_model,
+        config_path=f"{lang_model}.json",
+        use_cuda=False  # Set to True for GPU acceleration
+    )
+
+    out_wav = f"audio/tts/audio/{newId()}.wav"
+    open(out_wav, "x")
+    with wave.open(out_wav, "wb") as wav_file:
+        # Synthesize speech
+        voice.synthesize_wav(
+            text=text,
+            wav_file=wav_file,
+        )
+    
+    return wav_file
+
+
+
+"""
 ttsEngine = pyttsx3.init()
 ttsEngine.setProperty('rate', 140)
 
 def tts(text):
     ttsEngine.say(text)
     ttsEngine.runAndWait()
-#this is for testing purposes
+
 """
-file = "output.wav"
-input("press enter to start")
-sound.record()
-input ("press enter to end")
-sound.stop(file)
-input("press enter to play")
-sound.play(file)
-input("press enter to stop playing")
-sound.stop_play()
-
-#before testing this, you need to uncomment the print(result[text]) line in the stt function
-input("press enter to transcribe")
-stt(file)
-
-ai().ollama(ai.newId(), "hello")
-ai.delChat("a046ec2a-f52c-43ef-903a-7b7ce8849ad7")
-print(ai.newId())
-
-testid = ai.newId()
-answer = ''
-for t in ai().ollama(testid, "hello"):
-    answer += t
-tts(answer)
-print()
-for t in ai().ollama(testid, "why is the sky blue?"):
-    print(t, end='', flush=True)
-"""
+audiofile = tts("Dans deux semaines, je vais aller dans les vacances. Je suis tres heureuse. Je veux aller a la piscine.")

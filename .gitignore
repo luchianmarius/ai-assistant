@@ -1,6 +1,11 @@
 venv/
 .env
+__pycache__/
+
 output.wav
 index.py
-chats/*
-__pycache__/
+chats/
+audio/*
+!audio/tts/voices/info.md
+!audio/tts/voices/tts_models.json
+!audio/tts/audio/.gitkeep
