@@ -2,10 +2,12 @@ venv/
 .env
 __pycache__/
 
-output.wav
-index.py
-chats/
-audio/*
-!audio/tts/voices/info.md
-!audio/tts/voices/tts_models.json
-!audio/tts/audio/.gitkeep
+#this is for testing
+test.py
+
+#this folder has all of the tts models
+#the models are relatively big and i implemented a script that can download the right model from the json file
+audio/tts/voices/
+
+#this deletes all the test files before pushing
+before_git_push.py

@@ -1,5 +1,5 @@
 #general purpose
-import json, uuid, os
+import json, uuid, os, subprocess, shutil
 #sound
 import sounddevice as sd
 import soundfile as sf
@@ -40,12 +40,10 @@ class sound:
     playback_stream = None
 
     def play(file):
-        global playback_stream
-        audio_data, samplerate = sf.read(file)
-        playback_stream = sd.play(audio_data, samplerate)
+        audio_data, samplerate = sf.read(file, dtype="float32")
+        playback_stream = sd.play(audio_data, samplerate, blocking=False)
 
     def stop_play():
-        global playback_stream
         sd.stop()
 
 # stt = speech to text
@@ -118,26 +116,40 @@ def tts(text):
     # Load a voice model
     language = ld(text)
 
-    with open("audio/tts/voices/tts_models.json", "r") as file:
+    with open("audio/tts/tts_models.json", "r") as file:
         langlist = json.load(file)
         lang_model = None
         for i in langlist:
             if i["language"] == language:
                 lang_model = i["model_dir"]
+                lang_link = i["model_link"]
                 break
     
+    model_paths = "audio/tts/voices/"
+
     if not lang_model:
         raise ValueError(f"Keine Voice für language='{language}' gefunden")
+ 
+    if not os.path.isdir(model_paths):
+        os.mkdir(model_paths)
+  
+    if not os.path.isdir(f"{model_paths}{language}/"):
+        os.mkdir(f"{model_paths}{language}/")
 
-    if not os.path.isfile(lang_model):
-        raise FileNotFoundError(f"Modell-ONNX existiert nicht: {lang_model}")
+    if not os.path.isfile(f"{model_paths}{language}/{lang_model}"):
+        subprocess.run(["wget", lang_link])
+        shutil.move(lang_model, f"{model_paths}{language}/")
+
+    if not os.path.isfile(f"{model_paths}{language}/{lang_model}.json"):
+        subprocess.run(["wget", f"{lang_link}.json"])
+        shutil.move(f"{lang_model}.json", f"{model_paths}{language}/")
 
     print("Using language:", language)
     print("Using model:", lang_model)
 
     voice = PiperVoice.load(
-        model_path=lang_model,
-        config_path=f"{lang_model}.json",
+        model_path=f"{model_paths}{language}/{lang_model}",
+        config_path=f"{model_paths}{language}/{lang_model}.json",
         use_cuda=False  # Set to True for GPU acceleration
     )
 
@@ -150,7 +162,7 @@ def tts(text):
             wav_file=wav_file,
         )
     
-    return wav_file
+    return out_wav
 
 
 
@@ -163,4 +175,8 @@ def tts(text):
     ttsEngine.runAndWait()
 
 """
-audiofile = tts("Dans deux semaines, je vais aller dans les vacances. Je suis tres heureuse. Je veux aller a la piscine.")
+audiofile = tts("hello brother, how are you? I am here to help anytime.")
+print("done")
+sound.play(audiofile)
+input("press enter to stop")
+sound.stop_play()
