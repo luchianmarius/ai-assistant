@@ -19,6 +19,9 @@ class sound:
     #recording level of the microfone should be 70%, or else it will sound odd
     #INPUT_GAIN = 0.7
 
+    if not os.path.isdir("audio/stt/"):
+        os.mkdir("audio/stt/")
+
     def record():
         global frames, stream
         frames = []
@@ -57,6 +60,9 @@ def stt(file):
     return result["text"]
 
 class ai:
+    if not os.path.isdir("chats/"):
+        os.mkdir("chats/")
+
     #because you have self, you need to call this function using ollama().ai(...)) instead of ollama.ai(...)
     def ollama(self, chatid, message):
         msgs = self.jsonAppend(chatid, 'user', message)
@@ -113,6 +119,8 @@ def newId():
     return uuid.uuid4()
 
 def tts(text):
+    model_paths = "audio/tts/voices/"
+
     # Load a voice model
     language = ld(text)
 
@@ -125,27 +133,7 @@ def tts(text):
                 lang_link = i["model_link"]
                 break
     
-    model_paths = "audio/tts/voices/"
-
-    if not lang_model:
-        raise ValueError(f"Keine Voice für language='{language}' gefunden")
- 
-    if not os.path.isdir(model_paths):
-        os.mkdir(model_paths)
-  
-    if not os.path.isdir(f"{model_paths}{language}/"):
-        os.mkdir(f"{model_paths}{language}/")
-
-    if not os.path.isfile(f"{model_paths}{language}/{lang_model}"):
-        subprocess.run(["wget", lang_link])
-        shutil.move(lang_model, f"{model_paths}{language}/")
-
-    if not os.path.isfile(f"{model_paths}{language}/{lang_model}.json"):
-        subprocess.run(["wget", f"{lang_link}.json"])
-        shutil.move(f"{lang_model}.json", f"{model_paths}{language}/")
-
-    print("Using language:", language)
-    print("Using model:", lang_model)
+    tts_model_download(language, lang_model, lang_link)
 
     voice = PiperVoice.load(
         model_path=f"{model_paths}{language}/{lang_model}",
@@ -164,19 +152,27 @@ def tts(text):
     
     return out_wav
 
+#this functions checks whether the corresponding error is there and if not, it downloads it.
+def tts_model_download(language, lang_model, lang_link):
+    model_paths = "audio/tts/voices/"
 
+    if not lang_model:
+        raise ValueError(f"Keine Voice für language='{language}' gefunden")
+        process.exit()
+ 
+    if not os.path.isdir(model_paths):
+        os.mkdir(model_paths)
+  
+    if not os.path.isdir(f"{model_paths}{language}/"):
+        os.mkdir(f"{model_paths}{language}/")
 
-"""
-ttsEngine = pyttsx3.init()
-ttsEngine.setProperty('rate', 140)
+    if not os.path.isfile(f"{model_paths}{language}/{lang_model}"):
+        subprocess.run(["wget", lang_link])
+        shutil.move(lang_model, f"{model_paths}{language}/")
 
-def tts(text):
-    ttsEngine.say(text)
-    ttsEngine.runAndWait()
+    if not os.path.isfile(f"{model_paths}{language}/{lang_model}.json"):
+        subprocess.run(["wget", f"{lang_link}.json"])
+        shutil.move(f"{lang_model}.json", f"{model_paths}{language}/")
 
-"""
-audiofile = tts("hello brother, how are you? I am here to help anytime.")
-print("done")
-sound.play(audiofile)
-input("press enter to stop")
-sound.stop_play()
+    print("Using language:", language)
+    print("Using model:", lang_model)

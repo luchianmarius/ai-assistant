@@ -5,3 +5,4 @@ langdetect
 sounddevice
 soundfile
 numpy
+PyQt5
