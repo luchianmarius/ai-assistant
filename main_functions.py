@@ -7,7 +7,7 @@ import numpy as np
 #stt
 import whisper
 #ai
-from ollama import chat
+import ollama
 #tts
 from piper import PiperVoice
 from langdetect import detect as ld
@@ -59,62 +59,6 @@ def stt(file):
     #print(result["text"])
     return result["text"]
 
-class ai:
-    if not os.path.isdir("chats/"):
-        os.mkdir("chats/")
-
-    #because you have self, you need to call this function using ollama().ai(...)) instead of ollama.ai(...)
-    def ollama(self, chatid, message):
-        msgs = self.jsonAppend(chatid, 'user', message)
-
-        stream = chat(
-            model='mistral',
-            messages=msgs,
-            stream=True,
-        )
-        
-        answer = ""
-
-        for chunk in stream:
-            text = chunk['message']['content']
-            answer += text
-            yield text
-            """
-                #in the other file, you can do this:
-                import main_functions as mf
-                for text in mf.ai().ollama(mf.newId(), "why is the sky blue?"):
-                    print(text, end='', flush=True)
-                #this will take the stream and print it (but you should use text to speech)
-            """
-
-        self.jsonAppend(chatid, 'assistant', answer)
-
-    def jsonAppend(self, id, usr, msg):
-        if usr not in ("user", "assistant"):
-            print("!!! The user must be either 'user' or 'assistant'")
-            return 
-    
-        path = f"./chats/{id}.json"
-        newmsg = {'role': usr, 'content': msg}
-        content = []
-
-        if not os.path.isfile(path):    
-            with open(path, "x") as file:
-                content = [newmsg]
-                json.dump(content, file, indent=4)
-        else:
-            with open(path, "r") as file:
-                content = json.load(file)
-            content.append(newmsg)
-
-            with open(path, "w") as file:
-                json.dump(content, file, indent=4)
-        return content
-
-    #and this one, you need to call with ollama.delChat()
-    def delChat(chatid):
-        os.remove(f"./chats/{chatid}.json")
-
 def newId():
     return uuid.uuid4()
 
@@ -133,7 +77,9 @@ def tts(text):
                 lang_link = i["model_link"]
                 break
     
-    tts_model_download(language, lang_model, lang_link)
+    if not lang_model:
+        raise ValueError(f"no vioce found for language='{language}'")    
+    tts_model_check(language, lang_model, lang_link)
 
     voice = PiperVoice.load(
         model_path=f"{model_paths}{language}/{lang_model}",
@@ -153,12 +99,8 @@ def tts(text):
     return out_wav
 
 #this functions checks whether the corresponding error is there and if not, it downloads it.
-def tts_model_download(language, lang_model, lang_link):
+def tts_model_check(language, lang_model, lang_link):
     model_paths = "audio/tts/voices/"
-
-    if not lang_model:
-        raise ValueError(f"Keine Voice für language='{language}' gefunden")
-        process.exit()
  
     if not os.path.isdir(model_paths):
         os.mkdir(model_paths)
