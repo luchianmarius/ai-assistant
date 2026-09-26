@@ -1,3 +1,8 @@
+#this file is for 
+#   recording or playing audio files
+#   text to speech
+#   speech to text
+
 #general purpose
 import json, uuid, os, subprocess, shutil
 #sound
@@ -6,8 +11,6 @@ import soundfile as sf
 import numpy as np
 #stt
 import whisper
-#ai
-import ollama
 #tts
 from piper import PiperVoice
 from langdetect import detect as ld
