@@ -1,0 +1,22 @@
+[
+  {
+    "lang": "de",
+    "nomic-embed-text": "Beantworte die Frage anhand des bereitgestellten Dokumentkontexts. Wenn die Antwort darin nicht steht, sag das klar."
+  },
+  {
+    "lang": "en",
+    "nomic-embed-text": "Answer the question based on the provided document context. If the answer isn't stated there, say so clearly."
+  },
+  {
+    "lang": "ro",
+    "nomic-embed-text": "Răspunde la întrebare pe baza contextului documentului furnizat. Dacă răspunsul nu apare acolo, spune clar acest lucru."
+  },
+  {
+    "lang": "ru",
+    "nomic-embed-text": "Ответь на вопрос, опираясь на предоставленный контекст документа. Если ответа в нём нет, ясно об этом скажи."
+  },
+  {
+    "lang": "fr",
+    "nomic-embed-text": "Répondez à la question en vous basant sur le contexte du document fourni. Si la réponse n’y figure pas, dites-le clairement."
+  }
+]

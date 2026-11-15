@@ -8,3 +8,7 @@ They provide a big collection of open source icons that anybody can use. below i
 * [pencil-square](https://icons.getbootstrap.com/icons/pencil-square/)
 * [pin-angle](https://icons.getbootstrap.com/icons/pencil-square/)
 * [stars](https://icons.getbootstrap.com/icons/stars/)
+* [mic](https://icons.getbootstrap.com/assets/icons/mic.svg)
+* [x-circle](https://icons.getbootstrap.com/assets/icons/x-circle.svg)
+* [three-dots-vertical](https://icons.getbootstrap.com/assets/icons/three-dots-vertical.svg)
+* [trash](https://icons.getbootstrap.com/assets/icons/trash.svg)

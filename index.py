@@ -1,6 +1,7 @@
 import sound_functions as sf
 import ai_functions as ai
 import json
+from pathlib import Path
 
 import sys
 from PyQt5.QtWidgets import (
@@ -8,13 +9,12 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QLabel, QTextEdit,
     QLineEdit, QFrame, QSizePolicy, QListWidget,
-    QSplitter
+    QSplitter, QFileDialog
 )
-from PyQt5.QtGui import QIcon, QColor, QFont, QKeyEvent
-from PyQt5.QtCore import QSize, Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QIcon, QColor, QFont, QKeyEvent, QPixmap, QPainter
+from PyQt5.QtCore import QSize, Qt, QThread, pyqtSignal, QRectF, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt5.QtSvg import QSvgRenderer
-from PyQt5.QtCore import QRectF
-from PyQt5.QtGui import QPixmap, QPainter
+from PyQt5.QtWidgets import QGraphicsOpacityEffect
 
 
 # ---------- SVG icon helper ----------
@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         # SOME VARIABLES #########################
         self.chatid = None
         self.sb_visibility = True
+        self.prompt_files = []
 
         #########################################
         #SIDEBAR
@@ -233,34 +234,84 @@ class MainWindow(QMainWindow):
                 border-top: 1px solid rgba(255,255,255,0.08);
             }
         """)
-        input_layout = QHBoxLayout(input_bar)
+        input_layout = QVBoxLayout(input_bar)
         input_layout.setContentsMargins(16, 12, 16, 12)
         input_layout.setSpacing(10)
+
+        self.attachments_container = QWidget()
+        self.attachments_layout = QHBoxLayout(self.attachments_container)
+        self.attachments_layout.setContentsMargins(0, 0, 0, 0)
+        self.attachments_layout.setSpacing(8)
+        self.attachments_layout.addStretch(1)
+        self.attachments_container.setVisible(False)
+        input_layout.addWidget(self.attachments_container)
+
+        self.paperclip_button = QPushButton()
+        self.paperclip_button.setIcon(svg_icon_white("icons/paperclip.svg", QSize(18, 18)))
+        self.paperclip_button.setIconSize(QSize(18, 18))
+        self.paperclip_button.setFixedSize(40, 40)
+        self.paperclip_button.setToolTip("Attach file")
+        self.paperclip_button.setCursor(Qt.PointingHandCursor)
+        self.paperclip_button.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #e5e7eb;
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 8px;
+            }
+            QPushButton:hover { background: #1d4ed8; }
+        """)
+        self.paperclip_button.clicked.connect(self.uploadFile)
+
+        self.mic_button = QPushButton()
+        self.mic_button.setIcon(svg_icon_white("icons/mic.svg", QSize(18, 18)))
+        self.mic_button.setIconSize(QSize(18, 18))
+        self.mic_button.setFixedSize(40, 40)
+        self.mic_button.setToolTip("Voice input")
+        self.mic_button.setCursor(Qt.PointingHandCursor)
+        self.mic_button.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #e5e7eb;
+                border: 1px solid rgba(255,255,255,0.15);
+                border-radius: 8px;
+            }
+            QPushButton:hover { background: #1d4ed8; }
+        """)
+        self.mic_button.clicked.connect(self.toggle_mic)
 
         self.message_input = MessageInput()
         self.message_input.setPlaceholderText("Type a message...")
         self.message_input.sendRequested.connect(self.sendmsg)
-        self.message_input.setMinimumHeight(40)
-        self.message_input.setMaximumHeight(120)
         self.message_input.setStyleSheet("""
             QTextEdit {
                 background: rgba(255,255,255,0.06);
                 color: #e5e7eb;
                 border: 1px solid rgba(255,255,255,0.12);
                 border-radius: 12px;
-                padding: 10px 12px;
+                padding: 6px 12px;
                 font-size: 13px;
             }
         """)
 
-
         self.send_button = QPushButton("Send")
-        self.send_button.setFixedHeight(40)
+        self.send_button.setFixedHeight(36)
         self.send_button.setStyleSheet(blue_button)
         self.send_button.clicked.connect(self.sendmsg)
 
-        input_layout.addWidget(self.message_input, 1)
-        input_layout.addWidget(self.send_button, 0)
+        input_row = QHBoxLayout()
+        input_row.setSpacing(10)
+        input_row.addWidget(self.message_input, 1)
+
+        buttons_row = QHBoxLayout()
+        buttons_row.setSpacing(10)
+        buttons_row.addWidget(self.paperclip_button)
+        buttons_row.addWidget(self.mic_button)
+        buttons_row.addStretch(1)
+        buttons_row.addWidget(self.send_button, 0)
+
+        input_layout.addLayout(input_row)
+        input_layout.addLayout(buttons_row)
 
         main_layout.addWidget(input_bar)
 
@@ -331,6 +382,9 @@ class MainWindow(QMainWindow):
             self.sb_visibility = True
 
     def newchat(self):
+        self.chatid = None
+        self.prompt_files = []
+        self.refresh_attachments()
         self.chat_view.setStyleSheet("""
             QTextEdit {
                 background: #0b1220;
@@ -345,9 +399,9 @@ class MainWindow(QMainWindow):
         self.chat_view.setAlignment(Qt.AlignCenter)
 
     def sendmsg(self):
-        message = self.message_input.toPlainText().strip()
+        original_message = self.message_input.toPlainText().strip()
 
-        if not message:
+        if not original_message:
             return
 
         self.message_input.clear()
@@ -366,15 +420,25 @@ class MainWindow(QMainWindow):
         if self.chatid == None:
             self.chat_view.setText("")
             self.chat_view.setAlignment(Qt.AlignLeft)
-    
+
+        files = None
+        model_message = original_message
+        display_message = original_message
+
+        if self.prompt_files:
+            try:
+                files, model_message = ai.nomic_embed_text(self.prompt_files, original_message)
+            except Exception as error:
+                self.show_toast(f"File error: {error}")
+                return
+            file_lines = "\n".join([f"[{Path(f['path']).name}]" for f in files])
+            display_message = f"{file_lines}\n{original_message}" if file_lines else original_message
+
         self.chat_view.append(
-            f"\nYou:\n{message}\n \nAssistant:\n"
+            f"\nYou:\n{display_message}\n \nAssistant:\n"
         )
-        
-        """self.chat_view.append(
-            f"\nYou:\n{message}\n\nAssistant:\n"
-        )"""
-        self.worker = AIWorker(self.chatid, message)
+    
+        self.worker = AIWorker(self.chatid, model_message, files=files, display_content=original_message)
 
         self.worker.token.connect(self.receive_ai_token)
         self.worker.chat_created.connect(self.chat_created)
@@ -383,7 +447,8 @@ class MainWindow(QMainWindow):
 
         self.worker.start()
 
-
+        self.prompt_files = []
+        self.refresh_attachments()
 
     def chat_item_clicked(self, item):
         self.chat_view.setStyleSheet("""
@@ -421,9 +486,14 @@ class MainWindow(QMainWindow):
         for message in messages:
             role = message.get("role", "")
             content = message.get("content", "")
+            files = message.get("files") or []
 
             if role == "user":
-                self.chat_view.append(f"You:\n{content}\n")
+                if files:
+                    file_lines = "\n".join([f"[{Path(f.get('path', '')).name}]" for f in files])
+                    self.chat_view.append(f"You:\n{file_lines}\n{content}\n")
+                else:
+                    self.chat_view.append(f"You:\n{content}\n")
             elif role == "assistant":
                 self.chat_view.append(f"Assistant:\n{content}\n")
             else:
@@ -451,8 +521,119 @@ class MainWindow(QMainWindow):
         self.send_button.setEnabled(True)
         self.worker.deleteLater()
 
+    def uploadFile(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Select a file")
+        if path:
+            with open("supported_file_types.json", "r", encoding="utf-8") as file:
+                supported_ft = json.load(file)
+
+            if Path(path).suffix.lower() in supported_ft:
+                if path not in self.prompt_files:
+                    self.prompt_files.append(path)
+                    self.refresh_attachments()
+            else:
+                self.show_toast("File type not supported")
+
+    def refresh_attachments(self):
+        while self.attachments_layout.count():
+            item = self.attachments_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if not self.prompt_files:
+            self.attachments_container.setVisible(False)
+            return
+
+        self.attachments_container.setVisible(True)
+        for path in self.prompt_files:
+            name = Path(path).name
+            chip = QLabel(name)
+            chip.setToolTip(path)
+            chip.setStyleSheet("""
+                QLabel {
+                    background: rgba(255,255,255,0.08);
+                    color: #e5e7eb;
+                    border: 1px solid rgba(255,255,255,0.12);
+                    border-radius: 8px;
+                    padding: 6px 10px;
+                    font-size: 12px;
+                }
+            """)
+            self.attachments_layout.addWidget(chip)
+        self.attachments_layout.addStretch(1)
+
+    def show_toast(self, message, duration=1500):
+        toast = QLabel(message, self)
+        toast.setStyleSheet("""
+            QLabel {
+                background: #dc2626;
+                color: white;
+                padding: 10px 14px;
+                border-radius: 8px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+        """)
+        toast.setAlignment(Qt.AlignCenter)
+        toast.adjustSize()
+
+        margin_bottom = 120
+        x = (self.width() - toast.width()) // 2
+        y = self.height() - toast.height() - margin_bottom
+        toast.move(max(12, x), max(12, y))
+        toast.show()
+        toast.raise_()
+
+        effect = QGraphicsOpacityEffect(toast)
+        toast.setGraphicsEffect(effect)
+        effect.setOpacity(1.0)
+
+        fade = QPropertyAnimation(effect, b"opacity", self)
+        fade.setDuration(500)
+        fade.setStartValue(1.0)
+        fade.setEndValue(0.0)
+        fade.setEasingCurve(QEasingCurve.InOutQuad)
+
+        def start_fade():
+            fade.start()
+
+        fade.finished.connect(toast.deleteLater)
+        QTimer.singleShot(duration, start_fade)
+
+        if not hasattr(self, "_toasts"):
+            self._toasts = []
+        self._toasts.append((toast, fade, effect))
+        
+
+    def toggle_mic(self):
+        print("Mic button clicked")
+
 class MessageInput(QTextEdit):
     sendRequested = pyqtSignal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._min_height = 36
+        self._max_height = 150
+        self.setMinimumHeight(self._min_height)
+        self.setMaximumHeight(self._max_height)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.document().documentLayout().documentSizeChanged.connect(self.adjust_height)
+        self.textChanged.connect(self.adjust_height)
+        self.adjust_height()
+
+    def adjust_height(self):
+        doc_height = self.document().size().height()
+        margins = self.contentsMargins()
+        height = int(doc_height + margins.top() + margins.bottom() + self.frameWidth() * 2)
+        height = max(self._min_height, min(height, self._max_height))
+        self.setFixedHeight(height)
+
+        if self.document().size().height() + margins.top() + margins.bottom() + self.frameWidth() * 2 > self._max_height:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        else:
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     def keyPressEvent(self, event: QKeyEvent):
         # Shift + Enter: normale neue Zeile
@@ -470,17 +651,19 @@ class AIWorker(QThread):
     error = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, chatid, message):
+    def __init__(self, chatid, message, files=None, display_content=None):
         super().__init__()
         self.chatid = chatid
-        self.message = message        
+        self.message = message
+        self.files = files
+        self.display_content = display_content
 
     def run(self):
         try:
             chatid = self.chatid
 
             if chatid is None:
-                chatid = ai.newchat(self.message)
+                chatid = ai.newchat(self.display_content or self.message)
 
                 with open("chats/chats.json", "r", encoding="utf-8") as file:
                     chats = json.load(file)
@@ -493,7 +676,7 @@ class AIWorker(QThread):
 
                 self.chat_created.emit(chatid, chat_name)
 
-            for text in ai.ai(chatid, self.message):
+            for text in ai.ai(chatid, self.message, files=self.files, display_content=self.display_content):
                 self.token.emit(str(text))
 
         except Exception as error:

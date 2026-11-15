@@ -11,3 +11,6 @@ audio/tts/voices/
 
 #this deletes all the test files before pushing
 before_git_push.py
+
+#todo list
+todo.md
