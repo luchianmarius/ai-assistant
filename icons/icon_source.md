@@ -12,3 +12,5 @@ They provide a big collection of open source icons that anybody can use. below i
 * [x-circle](https://icons.getbootstrap.com/assets/icons/x-circle.svg)
 * [three-dots-vertical](https://icons.getbootstrap.com/assets/icons/three-dots-vertical.svg)
 * [trash](https://icons.getbootstrap.com/assets/icons/trash.svg)
+* [check2-circle](https://icons.getbootstrap.com/assets/icons/check2-circle.svg)
+* 

@@ -19,8 +19,6 @@ import wave
 class sound:
     frames = []
     stream = None
-    #recording level of the microfone should be 70%, or else it will sound odd
-    #INPUT_GAIN = 0.7
 
     if not os.path.isdir("audio/stt/"):
         os.mkdir("audio/stt/")
@@ -58,8 +56,7 @@ def stt(file):
     model = whisper.load_model("turbo")
     model = whisper.load_model("turbo")
     result = model.transcribe(file)
-    #testing purposes
-    #print(result["text"])
+    os.remove(file)
     return result["text"]
 
 def newId():
@@ -121,3 +118,5 @@ def tts_model_check(language, lang_model, lang_link):
 
     print("Using language:", language)
     print("Using model:", lang_model)
+
+

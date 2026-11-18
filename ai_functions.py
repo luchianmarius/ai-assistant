@@ -11,10 +11,15 @@ from langdetect import detect as ld
 if not os.path.isdir("chats/"):
     os.mkdir("chats/")
 
+def _atomic_write_json(path, data):
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=4)
+    os.replace(tmp_path, path)
+
 chat_file = Path("chats/chats.json")
 if not chat_file.exists() or chat_file.stat().st_size == 0:
-    with open("chats/chats.json", "x", encoding="utf-8") as file:
-        json.dump([], file, indent=4)
+    _atomic_write_json("chats/chats.json", [])
 
 def _strip_for_model(msgs):
     stripped = []
@@ -26,11 +31,11 @@ def _strip_for_model(msgs):
     return stripped
 
 
-def ai(chatid, message, files=None, display_content=None):
+def ai(chatid, message, files=None, display_content=None, is_new_chat=False):
 
     if chatid == None:
         chatid = newchat(display_content or message)
-    else:
+    elif not is_new_chat:
         updateDate(chatid)
 
     msgs = jsonAppend(chatid, 'user', display_content or message, files=files)
@@ -54,7 +59,7 @@ def ai(chatid, message, files=None, display_content=None):
 
     jsonAppend(chatid, 'assistant', answer)
 
-def newchat(msg):
+def newchat(msg, return_name=False):
     getNamePrompt = f"""
         Create a short, clear title for the users message.
 
@@ -70,25 +75,37 @@ def newchat(msg):
         {msg}
     """
     
-    newchat = {
+    chat_name = noLogAi(getNamePrompt).replace('"', '').strip()
+    newchat_dict = {
         "uuid": str(uuid.uuid4()),
         "lastEdited": datetime.datetime.now().isoformat(),
-        "chatName": noLogAi(getNamePrompt).replace('"', '').strip()
+        "chatName": chat_name,
+        "pinned": False,
     }
 
-    with open("chats/chats.json", "r", encoding="utf-8") as file:
-        chatsjson = json.load(file)
+    try:
+        with open("chats/chats.json", "r", encoding="utf-8") as file:
+            chatsjson = json.load(file)
+        if not isinstance(chatsjson, list):
+            chatsjson = []
+    except Exception:
+        chatsjson = []
 
-    chatsjson.insert(0, newchat)
+    chatsjson.insert(0, newchat_dict)
+    _atomic_write_json("chats/chats.json", chatsjson)
 
-    with open("chats/chats.json", "w", encoding="utf-8") as file:
-        json.dump(chatsjson, file, indent=4)
-
-    return newchat["uuid"]
+    if return_name:
+        return newchat_dict["uuid"], chat_name
+    return newchat_dict["uuid"]
 
 def updateDate(uuid):
-    with open("chats/chats.json", "r", encoding="utf-8") as file:
-        chats = json.load(file)
+    try:
+        with open("chats/chats.json", "r", encoding="utf-8") as file:
+            chats = json.load(file)
+        if not isinstance(chats, list):
+            return False
+    except Exception:
+        return False
 
     for index, chat in enumerate(chats):
         if chat["uuid"] == uuid:
@@ -99,8 +116,7 @@ def updateDate(uuid):
     else:
         return False
 
-    with open("chats/chats.json", "w", encoding="utf-8") as file:
-        json.dump(chats, file, indent=4)
+    _atomic_write_json("chats/chats.json", chats)
     return True
 
 def jsonAppend(id, usr, msg, files=None):
@@ -139,18 +155,25 @@ def getchatlist():
         return chats
 
 def delChat(chatid):
-    os.remove(f"./chats/{chatid}.json")
+    try:
+        os.remove(f"./chats/{chatid}.json")
+    except Exception:
+        pass
 
-    with open("chats/chats.json", "r", encoding="utf-8") as file:
-        chatsjson = json.load(file)
+    try:
+        with open("chats/chats.json", "r", encoding="utf-8") as file:
+            chatsjson = json.load(file)
+        if not isinstance(chatsjson, list):
+            chatsjson = []
+    except Exception:
+        chatsjson = []
 
     chatsjson = [
         chat for chat in chatsjson
         if chat["uuid"] != str(chatid)
     ]
 
-    with open("chats/chats.json", "w", encoding="utf-8") as file:
-        json.dump(chatsjson, file, indent=4)
+    _atomic_write_json("chats/chats.json", chatsjson)
 
 
 def noLogAi(message):

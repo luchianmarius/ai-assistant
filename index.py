@@ -1,6 +1,7 @@
 import sound_functions as sf
 import ai_functions as ai
 import json
+import os
 from pathlib import Path
 
 import sys
@@ -9,7 +10,7 @@ from PyQt5.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout,
     QPushButton, QLabel, QTextEdit,
     QLineEdit, QFrame, QSizePolicy, QListWidget,
-    QSplitter, QFileDialog
+    QSplitter, QFileDialog, QListWidgetItem, QMenu, QAction
 )
 from PyQt5.QtGui import QIcon, QColor, QFont, QKeyEvent, QPixmap, QPainter
 from PyQt5.QtCore import QSize, Qt, QThread, pyqtSignal, QRectF, QTimer, QPropertyAnimation, QEasingCurve
@@ -108,6 +109,7 @@ class MainWindow(QMainWindow):
         self.chatid = None
         self.sb_visibility = True
         self.prompt_files = []
+        self.mic_state = "idle"  # idle | recording | transcribing
 
         #########################################
         #SIDEBAR
@@ -159,27 +161,27 @@ class MainWindow(QMainWindow):
 
 
         self.chat_list = QListWidget()
-
+        self.chat_list.setSpacing(4)
         self.chat_list.setStyleSheet("""
             QListWidget {
                 background: transparent;
                 color: #e5e7eb;
                 border: none;
+                outline: none;
             }
             QListWidget::item {
-                padding: 10px;
-                border-radius: 8px;
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
             }
-            QListWidget::item:hover {
-                background: rgba(255,255,255,0.08);
+            QListWidget::item:selected {
+                background: transparent;
             }
         """)
-
-        for name in ai.getchatlist():
-            self.chat_list.addItem(name)
-
         self.chat_list.itemClicked.connect(self.chat_item_clicked)
-
+        self.refresh_chat_list()
+        #"Cancel"
 
         self.sidebar_layout.addWidget(self.chat_list, 1)
 
@@ -269,7 +271,7 @@ class MainWindow(QMainWindow):
         self.mic_button.setFixedSize(40, 40)
         self.mic_button.setToolTip("Voice input")
         self.mic_button.setCursor(Qt.PointingHandCursor)
-        self.mic_button.setStyleSheet("""
+        self._mic_idle_style = """
             QPushButton {
                 background: transparent;
                 color: #e5e7eb;
@@ -277,8 +279,33 @@ class MainWindow(QMainWindow):
                 border-radius: 8px;
             }
             QPushButton:hover { background: #1d4ed8; }
-        """)
+        """
+        self._mic_recording_style = """
+            QPushButton {
+                background: #dc2626;
+                color: #ffffff;
+                border: 1px solid #ef4444;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background: #b91c1c; }
+        """
+        self._mic_transcribing_style = """
+            QPushButton {
+                background: #2563eb;
+                color: #ffffff;
+                border: 1px solid #3b82f6;
+                border-radius: 8px;
+            }
+        """
+        self.mic_button.setStyleSheet(self._mic_idle_style)
         self.mic_button.clicked.connect(self.toggle_mic)
+
+        self._mic_opacity_effect = QGraphicsOpacityEffect(self.mic_button)
+        self.mic_button.setGraphicsEffect(self._mic_opacity_effect)
+        self._mic_opacity_effect.setOpacity(1.0)
+        self._mic_pulse_anim = QPropertyAnimation(self._mic_opacity_effect, b"opacity", self)
+        self._mic_pulse_anim.setLoopCount(-1)
+        self._mic_pulse_anim.setEasingCurve(QEasingCurve.InOutQuad)
 
         self.message_input = MessageInput()
         self.message_input.setPlaceholderText("Type a message...")
@@ -385,6 +412,7 @@ class MainWindow(QMainWindow):
         self.chatid = None
         self.prompt_files = []
         self.refresh_attachments()
+        self.chat_list.clearSelection()
         self.chat_view.setStyleSheet("""
             QTextEdit {
                 background: #0b1220;
@@ -395,8 +423,9 @@ class MainWindow(QMainWindow):
                 font-size: 50px;
             }
         """)
-        self.chat_view.setText("Welcome to my AI assistant")
+        self.chat_view.clear()
         self.chat_view.setAlignment(Qt.AlignCenter)
+        self.chat_view.setText("Welcome to my AI assistant")
 
     def sendmsg(self):
         original_message = self.message_input.toPlainText().strip()
@@ -450,7 +479,295 @@ class MainWindow(QMainWindow):
         self.prompt_files = []
         self.refresh_attachments()
 
+    def _chats_path(self):
+        return "chats/chats.json"
+
+    def _load_chats_data(self):
+        try:
+            with open(self._chats_path(), "r", encoding="utf-8") as file:
+                chats = json.load(file)
+            if not isinstance(chats, list):
+                return []
+        except Exception:
+            return None
+
+        changed = False
+        normalized = []
+        for chat in chats:
+            if not isinstance(chat, dict):
+                changed = True
+                continue
+            if "pinned" not in chat:
+                chat["pinned"] = False
+                changed = True
+            normalized.append(chat)
+
+        if changed:
+            try:
+                self._save_chats_data(normalized)
+            except Exception:
+                pass
+        return normalized
+
+    def _save_chats_data(self, chats):
+        path = self._chats_path()
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as file:
+            json.dump(chats, file, indent=4)
+        os.replace(tmp_path, path)
+
+    def _sorted_chats(self, chats):
+        pinned = [c for c in chats if c.get("pinned")]
+        others = [c for c in chats if not c.get("pinned")]
+        return pinned + others
+
+    def refresh_chat_list(self):
+        data = self._load_chats_data()
+        if data is None:
+            return
+        chats = self._sorted_chats(data)
+
+        self.chat_list.clear()
+        for chat in chats:
+            uuid = chat.get("uuid")
+            if not uuid:
+                continue
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, uuid)
+            item.setSizeHint(QSize(0, 44))
+            widget = self.create_chat_item_widget(chat)
+            self.chat_list.addItem(item)
+            self.chat_list.setItemWidget(item, widget)
+            if self.chatid and uuid == self.chatid:
+                self.chat_list.setCurrentItem(item)
+
+    def create_chat_item_widget(self, chat):
+        uuid = chat.get("uuid")
+        name = chat.get("chatName", "")
+        pinned = chat.get("pinned", False)
+
+        row = QFrame()
+        row.setObjectName("chatRow")
+        row.setStyleSheet("""
+            QFrame#chatRow {
+                background: transparent;
+                border-radius: 8px;
+            }
+            QFrame#chatRow:hover {
+                background: rgba(255,255,255,0.08);
+            }
+            QLabel { color: #e5e7eb; border: none; background: transparent; }
+            QPushButton {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover { background: rgba(255,255,255,0.08); }
+        """)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(8, 6, 6, 6)
+        layout.setSpacing(6)
+
+        pin_icon = QLabel()
+        if pinned:
+            pin_icon.setPixmap(svg_icon_white("icons/pin-angle.svg", QSize(14, 14)).pixmap(QSize(14, 14)))
+            pin_icon.setFixedSize(16, 16)
+        else:
+            pin_icon.setFixedSize(0, 16)
+        pin_icon.setStyleSheet("background: transparent; border: none;")
+        layout.addWidget(pin_icon)
+
+        name_label = QLabel(name)
+        name_label.setObjectName("chatNameLabel")
+        name_label.setStyleSheet("font-size: 13px;")
+        layout.addWidget(name_label, 1)
+
+        menu_btn = QPushButton()
+        menu_btn.setIcon(svg_icon_white("icons/three-dots-vertical.svg", QSize(16, 16)))
+        menu_btn.setIconSize(QSize(16, 16))
+        menu_btn.setFixedSize(24, 24)
+        menu_btn.setCursor(Qt.PointingHandCursor)
+        menu_btn.clicked.connect(lambda _, u=uuid, b=menu_btn: self.show_chat_menu(u, b))
+        layout.addWidget(menu_btn)
+
+        row.chat_uuid = uuid
+        row.name_label = name_label
+        row.menu_btn = menu_btn
+        row.pin_icon = pin_icon
+        row.main_layout = layout
+        return row
+
+    def _find_item_by_uuid(self, uuid):
+        for i in range(self.chat_list.count()):
+            item = self.chat_list.item(i)
+            if item.data(Qt.UserRole) == uuid:
+                return item
+        return None
+
+    def _select_chat_by_uuid(self, uuid):
+        item = self._find_item_by_uuid(uuid)
+        if item:
+            self.chat_list.setCurrentItem(item)
+
+    def show_chat_menu(self, uuid, button):
+        chats = self._load_chats_data() or []
+        chat = next((c for c in chats if c.get("uuid") == uuid), None)
+        if not chat:
+            return
+        pinned = chat.get("pinned", False)
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #111827; color: #e5e7eb; border: 1px solid rgba(255,255,255,0.12); }
+            QMenu::item { padding: 6px 12px; }
+            QMenu::item:selected { background: rgba(255,255,255,0.08); }
+        """)
+        pin_text = "Unpin" if pinned else "Pin"
+        pin_action = QAction(svg_icon_white("icons/pin-angle.svg", QSize(14, 14)), pin_text, self)
+        rename_action = QAction(svg_icon_white("icons/pencil-square.svg", QSize(14, 14)), "Rename", self)
+        delete_action = QAction(svg_icon_white("icons/trash.svg", QSize(14, 14)), "Delete", self)
+
+        pin_action.triggered.connect(lambda _, u=uuid: self.toggle_pin_chat(u))
+        rename_action.triggered.connect(lambda _, u=uuid: self.start_rename_chat(u))
+        delete_action.triggered.connect(lambda _, u=uuid: self.delete_chat(u))
+
+        menu.addAction(pin_action)
+        menu.addAction(rename_action)
+        menu.addAction(delete_action)
+        menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+
+    def toggle_pin_chat(self, uuid):
+        chats = self._load_chats_data() or []
+        for chat in chats:
+            if chat.get("uuid") == uuid:
+                chat["pinned"] = not chat.get("pinned", False)
+                break
+        self._save_chats_data(chats)
+        self.refresh_chat_list()
+        self._select_chat_by_uuid(self.chatid)
+
+    def delete_chat(self, uuid):
+        chats = self._load_chats_data() or []
+        chats = [c for c in chats if c.get("uuid") != uuid]
+        self._save_chats_data(chats)
+        try:
+            os.remove(f"chats/{uuid}.json")
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+        if self.chatid == uuid:
+            self.chatid = None
+            self.chat_view.setStyleSheet("""
+                QTextEdit {
+                    background: #0b1220;
+                    color: #e5e7eb;
+                    border: 1px solid rgba(255,255,255,0.08);
+                    border-radius: 12px;
+                    padding: 12px;
+                    font-size: 50px;
+                }
+            """)
+            self.chat_view.setText("Welcome to my AI assistant")
+            self.chat_view.setAlignment(Qt.AlignCenter)
+        self.refresh_chat_list()
+
+    def start_rename_chat(self, uuid):
+        item = self._find_item_by_uuid(uuid)
+        if not item:
+            return
+        row = self.chat_list.itemWidget(item)
+        if not row or hasattr(row, "rename_editor"):
+            return
+
+        chats = self._load_chats_data() or []
+        chat = next((c for c in chats if c.get("uuid") == uuid), None)
+        if not chat:
+            return
+        current_name = chat.get("chatName", "")
+
+        row.name_label.hide()
+        row.menu_btn.hide()
+
+        editor = QLineEdit(current_name)
+        editor.setStyleSheet("""
+            QLineEdit {
+                background: rgba(255,255,255,0.06);
+                color: #e5e7eb;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 13px;
+            }
+        """)
+
+        cancel_btn = QPushButton()
+        cancel_btn.setIcon(svg_icon_white("icons/x-circle.svg", QSize(18, 18)))
+        cancel_btn.setIconSize(QSize(15, 15))
+        cancel_btn.setFixedSize(30, 30)
+        cancel_btn.setToolTip("Cancel")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        
+        rename_btn = QPushButton()
+        rename_btn.setIcon(svg_icon_white("icons/check2-circle.svg", QSize(18, 18)))
+        rename_btn.setIconSize(QSize(15,15))
+        rename_btn.setFixedSize(30, 30)
+        rename_btn.setToolTip("Rename")
+        rename_btn.setCursor(Qt.PointingHandCursor)
+        
+        for b in (rename_btn, cancel_btn):
+            b.setFixedHeight(28)
+            b.setCursor(Qt.PointingHandCursor)
+        rename_btn.setStyleSheet("""
+            QPushButton { background: #2563eb; color: white; border: none; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
+            QPushButton:hover { background: #1d4ed8; }
+        """)
+        cancel_btn.setStyleSheet("""
+            QPushButton { background: transparent; color: #e5e7eb; border: 1px solid rgba(255,255,255,0.15); padding: 4px 8px; border-radius: 6px; }
+            QPushButton:hover { background: rgba(255,255,255,0.08); }
+        """)
+
+        container = QWidget()
+        c_layout = QHBoxLayout(container)
+        c_layout.setContentsMargins(0, 0, 0, 0)
+        c_layout.setSpacing(6)
+        c_layout.addWidget(editor, 1)
+        c_layout.addWidget(cancel_btn)
+        c_layout.addWidget(rename_btn)
+
+        # insert before menu button (last widget)
+        row.main_layout.insertWidget(2, container, 1)
+
+        row.rename_editor = container
+
+        def finish(save):
+            if save:
+                new_name = editor.text().strip()
+                if new_name:
+                    chats2 = self._load_chats_data() or []
+                    for c in chats2:
+                        if c.get("uuid") == uuid:
+                            c["chatName"] = new_name
+                            break
+                    self._save_chats_data(chats2)
+            row.main_layout.removeWidget(container)
+            container.deleteLater()
+            if hasattr(row, "rename_editor"):
+                delattr(row, "rename_editor")
+            row.name_label.show()
+            row.menu_btn.show()
+            self.refresh_chat_list()
+            self._select_chat_by_uuid(self.chatid)
+
+        rename_btn.clicked.connect(lambda: finish(True))
+        cancel_btn.clicked.connect(lambda: finish(False))
+        editor.returnPressed.connect(lambda: finish(True))
+        editor.setFocus()
+
     def chat_item_clicked(self, item):
+        uuid = item.data(Qt.UserRole)
+        if not uuid:
+            return
         self.chat_view.setStyleSheet("""
             QTextEdit {
                 background: #0b1220;
@@ -461,14 +778,8 @@ class MainWindow(QMainWindow):
                 font-size: 17px;
             }
         """)
-        chat_name = item.text()
-        with open("chats/chats.json", "r") as file:
-            chats = json.load(file)
-            for chat in chats:
-                if chat["chatName"] == chat_name:
-                    self.chatid = chat["uuid"]
-                    self.load_chat(self.chatid)
-                    break
+        self.chatid = uuid
+        self.load_chat(uuid)
 
     def load_chat(self, uuid):
         try:
@@ -510,7 +821,8 @@ class MainWindow(QMainWindow):
 
     def chat_created(self, chatid, chat_name):
         self.chatid = chatid
-        self.chat_list.insertItem(0, chat_name)
+        self.refresh_chat_list()
+        self._select_chat_by_uuid(chatid)
 
 
     def receive_ai_error(self, error):
@@ -546,22 +858,49 @@ class MainWindow(QMainWindow):
             return
 
         self.attachments_container.setVisible(True)
-        for path in self.prompt_files:
-            name = Path(path).name
-            chip = QLabel(name)
-            chip.setToolTip(path)
+        for path in list(self.prompt_files):
+            chip = QFrame()
             chip.setStyleSheet("""
-                QLabel {
+                QFrame {
                     background: rgba(255,255,255,0.08);
-                    color: #e5e7eb;
                     border: 1px solid rgba(255,255,255,0.12);
                     border-radius: 8px;
-                    padding: 6px 10px;
-                    font-size: 12px;
                 }
             """)
+            chip_layout = QHBoxLayout(chip)
+            chip_layout.setContentsMargins(8, 4, 6, 4)
+            chip_layout.setSpacing(6)
+
+            name_label = QLabel(Path(path).name)
+            name_label.setToolTip(path)
+            name_label.setStyleSheet("color: #e5e7eb; font-size: 12px; border: none; background: transparent;")
+
+            remove_btn = QPushButton()
+            remove_btn.setIcon(svg_icon_white("icons/x-circle.svg", QSize(14, 14)))
+            remove_btn.setIconSize(QSize(14, 14))
+            remove_btn.setFixedSize(20, 20)
+            remove_btn.setCursor(Qt.PointingHandCursor)
+            remove_btn.setStyleSheet("""
+                QPushButton {
+                    background: transparent;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background: rgba(255,255,255,0.08);
+                    border-radius: 10px;
+                }
+            """)
+            remove_btn.clicked.connect(lambda _, p=path: self.remove_prompt_file(p))
+
+            chip_layout.addWidget(name_label)
+            chip_layout.addWidget(remove_btn)
             self.attachments_layout.addWidget(chip)
         self.attachments_layout.addStretch(1)
+
+    def remove_prompt_file(self, path):
+        if path in self.prompt_files:
+            self.prompt_files.remove(path)
+        self.refresh_attachments()
 
     def show_toast(self, message, duration=1500):
         toast = QLabel(message, self)
@@ -606,8 +945,86 @@ class MainWindow(QMainWindow):
         self._toasts.append((toast, fade, effect))
         
 
+    def _start_mic_pulse(self, duration=900, min_opacity=0.35):
+        self._mic_pulse_anim.stop()
+        self._mic_pulse_anim.setDuration(duration)
+        self._mic_pulse_anim.setKeyValueAt(0.0, 1.0)
+        self._mic_pulse_anim.setKeyValueAt(0.5, min_opacity)
+        self._mic_pulse_anim.setKeyValueAt(1.0, 1.0)
+        self._mic_pulse_anim.start()
+
+    def _set_mic_idle(self):
+        self.mic_state = "idle"
+        self._mic_pulse_anim.stop()
+        self._mic_opacity_effect.setOpacity(1.0)
+        self.mic_button.setEnabled(True)
+        self.mic_button.setStyleSheet(self._mic_idle_style)
+        self.mic_button.setToolTip("Voice input")
+
+    def _set_mic_recording(self):
+        self.mic_state = "recording"
+        self.mic_button.setEnabled(True)
+        self.mic_button.setStyleSheet(self._mic_recording_style)
+        self.mic_button.setToolTip("Stop recording")
+        self._start_mic_pulse(duration=900, min_opacity=0.35)
+
+    def _set_mic_transcribing(self):
+        self.mic_state = "transcribing"
+        self.mic_button.setEnabled(False)
+        self.mic_button.setStyleSheet(self._mic_transcribing_style)
+        self.mic_button.setToolTip("Transcribing...")
+        self._start_mic_pulse(duration=650, min_opacity=0.45)
+
     def toggle_mic(self):
-        print("Mic button clicked")
+        if self.mic_state == "idle":
+            try:
+                sf.sound.record()
+            except Exception as error:
+                self.show_toast(f"Mic error: {error}")
+                self._set_mic_idle()
+                return
+            self._set_mic_recording()
+            return
+
+        if self.mic_state == "recording":
+            try:
+                file_id = sf.sound.stop()
+            except Exception as error:
+                self.show_toast(f"Mic error: {error}")
+                self._set_mic_idle()
+                return
+
+            audio_path = os.path.join("audio", "stt", f"{file_id}.wav")
+            self._set_mic_transcribing()
+            self.stt_worker = STTWorker(audio_path)
+            self.stt_worker.transcribed.connect(self.receive_transcription)
+            self.stt_worker.error.connect(self.receive_stt_error)
+            self.stt_worker.finished.connect(self.stt_finished)
+            self.stt_worker.start()
+            return
+
+        # transcribing: ignore clicks while work is in progress
+
+    def receive_transcription(self, text):
+        text = (text or "").strip()
+        if not text:
+            self.show_toast("No speech detected")
+            return
+
+        current = self.message_input.toPlainText()
+        if current and not current.endswith((" ", "\n")):
+            self.message_input.insertPlainText(" " + text)
+        else:
+            self.message_input.insertPlainText(text)
+        self.message_input.setFocus()
+
+    def receive_stt_error(self, error):
+        self.show_toast(f"Transcription error: {error}")
+
+    def stt_finished(self):
+        self._set_mic_idle()
+        if hasattr(self, "stt_worker"):
+            self.stt_worker.deleteLater()
 
 class MessageInput(QTextEdit):
     sendRequested = pyqtSignal()
@@ -661,22 +1078,14 @@ class AIWorker(QThread):
     def run(self):
         try:
             chatid = self.chatid
+            is_new_chat = False
 
             if chatid is None:
-                chatid = ai.newchat(self.display_content or self.message)
-
-                with open("chats/chats.json", "r", encoding="utf-8") as file:
-                    chats = json.load(file)
-
-                chat_name = next(
-                    chat["chatName"]
-                    for chat in chats
-                    if chat["uuid"] == chatid
-                )
-
+                is_new_chat = True
+                chatid, chat_name = ai.newchat(self.display_content or self.message, return_name=True)
                 self.chat_created.emit(chatid, chat_name)
 
-            for text in ai.ai(chatid, self.message, files=self.files, display_content=self.display_content):
+            for text in ai.ai(chatid, self.message, files=self.files, display_content=self.display_content, is_new_chat=is_new_chat):
                 self.token.emit(str(text))
 
         except Exception as error:
@@ -684,6 +1093,26 @@ class AIWorker(QThread):
 
         finally:
             self.finished.emit()
+
+
+class STTWorker(QThread):
+    transcribed = pyqtSignal(str)
+    error = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, audio_path):
+        super().__init__()
+        self.audio_path = audio_path
+
+    def run(self):
+        try:
+            text = sf.stt(self.audio_path)
+            self.transcribed.emit(text or "")
+        except Exception as error:
+            self.error.emit(f"{type(error).__name__}: {error}")
+        finally:
+            self.finished.emit()
+
 
 
 if __name__ == "__main__":
